@@ -18,12 +18,12 @@ local planets = {
     { name = "Pluto",   id = "999" },
 }
 
-local center = "500@399" -- Mauna Kea
+local center = "coord@399"
 local step_size = "1 m"
 
--- Observer: Saint-Adresse, Le Havre, France
-local observer_lat = math.rad(49.4880)
-local observer_lon = 0.1946 -- degrees
+-- Observer: Bordeaux-Saint-Clair (Étretat), France
+local observer_lat = math.rad(49.7079)
+local observer_lon = 0.2056 -- degrees
 
 local month_map = {Jan=1, Feb=2, Mar=3, Apr=4, May=5, Jun=6,
                    Jul=7, Aug=8, Sep=9, Oct=10, Nov=11, Dec=12}
