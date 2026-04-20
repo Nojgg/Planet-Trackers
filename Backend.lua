@@ -1,12 +1,14 @@
 -- Backend.lua
 Backend = {}
 
--- Backend.lua
-local OBSERVER_LAT_DEG = 46.2276  -- France Latitude
-local OBSERVER_LON_DEG = 2.2137   -- France Longitude
-local OBSERVER_LAT     = math.rad(OBSERVER_LAT_DEG)
-local CENTER           = "coord@399"
-local STEP_SIZE        = "1 m"
+-- Defaults in case the internet is out (Will be updated by initLocation)
+Backend.lat = 46.2276
+Backend.lon = 2.2137
+
+-- Internal variables for math
+local OBSERVER_LAT = math.rad(Backend.lat)
+local CENTER       = "coord@399"
+local STEP_SIZE    = "1 m"
 
 Backend.planets = {
     { name = "Mercury", id = "199", color = {0.80, 0.55, 0.85} },
@@ -20,6 +22,32 @@ Backend.planets = {
     { name = "Moon",    id = "301", color = {0.95, 0.95, 0.95} },
 }
 
+-- --- LOCATION SYNC LOGIC ---
+function Backend.initLocation()
+    local thread_code = [[
+        local handle = io.popen('curl -s "http://ip-api.com/json/"')
+        local result = handle:read("*a")
+        handle:close()
+        local lat = result:match('"lat":([%d%.%-]+)')
+        local lon = result:match('"lon":([%d%.%-]+)')
+        love.thread.getChannel("loc_res"):push({lat = tonumber(lat), lon = tonumber(lon)})
+    ]]
+    love.thread.newThread(thread_code):start()
+end
+
+function Backend.updateLocation()
+    local res = love.thread.getChannel("loc_res"):pop()
+    if res and res.lat and res.lon then
+        Backend.lat = res.lat
+        Backend.lon = res.lon
+        OBSERVER_LAT = math.rad(Backend.lat) -- Update the math variable
+        print(string.format("Location Synced: %.4f, %.4f", Backend.lat, Backend.lon))
+        return true
+    end
+    return false
+end
+
+-- --- CORE ASTRONOMY MATH ---
 local function urlencode(str)
     return (str:gsub("\n","\r\n"):gsub("([^%w%-%.%_%~])", function(c)
         return string.format("%%%02X", string.byte(c))
@@ -28,30 +56,12 @@ end
 
 local function q(v) return urlencode("'"..v.."'") end
 
-local function build_url(command, start_time, stop_time)
-    local params = {
-        "format=text",
-        "COMMAND="..q(command),
-        "OBJ_DATA="..q("NO"),
-        "MAKE_EPHEM="..q("YES"),
-        "EPHEM_TYPE="..q("OBSERVER"),
-        "CENTER="..q(CENTER),
-        "START_TIME="..q(start_time),
-        "STOP_TIME="..q(stop_time),
-        "STEP_SIZE="..q(STEP_SIZE),
-        "QUANTITIES="..q("1,13"), -- 1=RA/Dec, 13=Angular Diameter
-        "ANG_FORMAT="..q("DEG"),
-        "EXTRA_PREC="..q("YES"),
-    }
-    return "https://ssd.jpl.nasa.gov/api/horizons.api?"..table.concat(params,"&")
-end
-
 local function lst_deg(time_utc)
     local jd  = 2440587.5 + time_utc/86400
     local T   = (jd - 2451545.0)/36525
     local gst = 280.46061837 + 360.98564736629*(jd-2451545.0) + 0.000387933*T^2 - T^3/38710000
     gst = (gst % 360 + 360) % 360
-    return (gst + OBSERVER_LON_DEG) % 360
+    return (gst + Backend.lon) % 360
 end
 
 local function ra_dec_to_altaz(ra_deg, dec_deg, time_utc)
@@ -72,7 +82,27 @@ local function rise_transit_set(ra_deg, dec_deg, date_utc)
     if cos_H >  1 then return "✗", "✗", "✗" end
     local ra, lst, H = math.rad(ra_deg), math.rad(lst_deg(date_utc)), math.acos(math.max(-1, math.min(1, cos_H)))
     local tr = date_utc + (ra - lst)/(2*math.pi)*86400
-    return os.date("!%H:%M", tr - H/(2*math.pi)*86400), os.date("!%H:%M", tr), os.date("!%H:%M", tr + H/(2*math.pi)*86400)
+    -- Removing "!" from os.date to use local laptop time for rise/set
+    return os.date("%H:%M", tr - H/(2*math.pi)*86400), os.date("%H:%M", tr), os.date("%H:%M", tr + H/(2*math.pi)*86400)
+end
+
+-- --- DATA FETCHING ---
+local function build_url(command, start_time, stop_time)
+    local params = {
+        "format=text",
+        "COMMAND="..q(command),
+        "OBJ_DATA="..q("NO"),
+        "MAKE_EPHEM="..q("YES"),
+        "EPHEM_TYPE="..q("OBSERVER"),
+        "CENTER="..q(CENTER),
+        "START_TIME="..q(start_time),
+        "STOP_TIME="..q(stop_time),
+        "STEP_SIZE="..q(STEP_SIZE),
+        "QUANTITIES="..q("1,13"),
+        "ANG_FORMAT="..q("DEG"),
+        "EXTRA_PREC="..q("YES"),
+    }
+    return "https://ssd.jpl.nasa.gov/api/horizons.api?"..table.concat(params,"&")
 end
 
 local function parse_rows(text)
@@ -83,7 +113,6 @@ local function parse_rows(text)
         elseif in_table and line:match("%S") then
             local tokens = {}
             for tok in line:gmatch("%S+") do tokens[#tokens+1] = tok end
-            -- RA is -2, Dec is -1, Ang_Size is last token
             if #tokens >= 5 then
                 local ra, dec, ang = tonumber(tokens[#tokens-2]), tonumber(tokens[#tokens-1]), tonumber(tokens[#tokens])
                 if ra and dec then rows[#rows+1] = {ra=ra, dec=dec, ang_size=ang or 0.1} end
@@ -96,11 +125,11 @@ end
 function Backend.fetch_planet(planet, time_utc, callback)
     local start_t = os.date("!%Y-%m-%d %H:%M:%S", time_utc)
     local stop_t  = os.date("!%Y-%m-%d %H:%M:%S", time_utc + 60)
-    local url     = build_url(planet.id, start_t, stop_t)
+    local url      = build_url(planet.id, start_t, stop_t)
 
     local thread_code = [[
         local url, planet_name = ...
-        local cmd = string.format('curl -s "%s"', url)
+        local cmd = string.format('curl -s -L "%s"', url)
         local handle = io.popen(cmd)
         local result = handle:read("*a")
         handle:close()
@@ -121,14 +150,24 @@ function Backend.poll()
     if not entry then return end
     Backend._pending[msg.planet] = nil
     if not msg.ok then entry.callback(nil, "Net Err") return end
+    
     local rows = parse_rows(msg.body)
     if #rows == 0 then entry.callback(nil, "Parse Err") return end
     local row = rows[1]
+    
     local alt, az = ra_dec_to_altaz(row.ra, row.dec, entry.time_utc)
     local rise, tr_str, set = rise_transit_set(row.ra, row.dec, entry.time_utc)
+    
     entry.callback({
-        planet = entry.planet, alt = alt, az = az, cardinal = ({"N","NE","E","SE","S","SW","W","NW"})[math.floor(((az+22.5)%360)/45)+1],
-        rise = rise, transit = tr_str, set = set, visible = alt > 0, ang_size = row.ang_size
+        planet = entry.planet, 
+        alt = alt, 
+        az = az, 
+        cardinal = ({"N","NE","E","SE","S","SW","W","NW"})[math.floor(((az+22.5)%360)/45)+1],
+        rise = rise, 
+        transit = tr_str, 
+        set = set, 
+        visible = alt > 0, 
+        ang_size = row.ang_size
     }, nil)
 end
 
