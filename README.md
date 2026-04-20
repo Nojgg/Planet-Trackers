@@ -37,5 +37,6 @@ The interface includes a simulated eyepiece view that accounts for Newtonian inv
 Network requests to NASA's Horizons system are handled in a separate thread to prevent UI blocking during data fetch cycles.
 
 
+#### Theres alot of useless files , don't worry about it its just for personal testing and i never actually deleted them because they can always be usefull, just download the release !
 ---
 *Hadley 114/900 Mission Control Documentation 2026
