@@ -20,7 +20,6 @@ The interface includes a simulated eyepiece view that accounts for Newtonian inv
 ## Controls
 
 ### Navigation
-* **TAB:** Toggle between the Observer Log and Equipment Specifications.
 * **Mouse Click:** Select a celestial body from the sidebar to track.
 * **N:** Toggle Night Mode (Red Filter).
 * **R:** Reset time offset to current UTC.
