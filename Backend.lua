@@ -1,16 +1,13 @@
--- Backend.lua
 Backend = {}
 
--- Defaults in case the internet is out (Will be updated by initLocation)
 Backend.lat = 46.2276
 Backend.lon = 2.2137
 
--- Internal variables for math
+
 local OBSERVER_LAT = math.rad(Backend.lat)
 local CENTER       = "coord@399"
 local STEP_SIZE    = "1 m"
 
--- AJOUT : Nouveaux objets (Soleil, Étoiles, DSO)
 Backend.planets = {
     { name = "Sun",     id = "10",      color = {1.0, 0.9, 0.2} },
     { name = "Mercury", id = "199",     color = {0.80, 0.55, 0.85} },
@@ -24,14 +21,12 @@ Backend.planets = {
     { name = "Moon",    id = "301",     color = {0.95, 0.95, 0.95} },
 }
 
--- AJOUT : Fonction de Réfraction
 local function apply_refraction(alt_deg)
     if alt_deg < -0.8 then return alt_deg end
     local r = 1.02 / math.tan(math.rad(alt_deg + 10.3 / (alt_deg + 5.11)))
     return alt_deg + (r / 60)
 end
 
--- AJOUT : Fonction État du Ciel
 function Backend.getSkyCondition(sun_alt)
     if not sun_alt then return "Loading..." end
     if sun_alt > 0 then return "Jour"
@@ -41,7 +36,6 @@ function Backend.getSkyCondition(sun_alt)
     else return "Nuit Noire" end
 end
 
--- --- LOCATION SYNC LOGIC ---
 function Backend.initLocation()
     local thread_code = [[
         local handle = io.popen('curl -s "http://ip-api.com/json/"')
@@ -59,14 +53,12 @@ function Backend.updateLocation()
     if res and res.lat and res.lon then
         Backend.lat = res.lat
         Backend.lon = res.lon
-        OBSERVER_LAT = math.rad(Backend.lat) -- Update the math variable
-      --  print(string.format("Location Synced: %.4f, %.4f", Backend.lat, Backend.lon))
+        OBSERVER_LAT = math.rad(Backend.lat) 
         return true
     end
     return false
 end
 
--- --- CORE ASTRONOMY MATH ---
 local function urlencode(str)
     return (str:gsub("\n","\r\n"):gsub("([^%w%-%.%_%~])", function(c)
         return string.format("%%%02X", string.byte(c))
@@ -91,8 +83,7 @@ local function ra_dec_to_altaz(ra_deg, dec_deg, time_utc)
     local cos_az = (math.sin(dec) - math.sin(alt)*math.sin(OBSERVER_LAT)) / (math.cos(alt)*math.cos(OBSERVER_LAT))
     local az = math.acos(math.max(-1, math.min(1, cos_az)))
     if math.sin(ha) > 0 then az = 2*math.pi - az end
-    
-    -- MODIFICATION : Application de la réfraction au retour
+ 
     return apply_refraction(math.deg(alt)), math.deg(az)
 end
 
@@ -103,11 +94,9 @@ local function rise_transit_set(ra_deg, dec_deg, date_utc)
     if cos_H >  1 then return "✗", "✗", "✗" end
     local ra, lst, H = math.rad(ra_deg), math.rad(lst_deg(date_utc)), math.acos(math.max(-1, math.min(1, cos_H)))
     local tr = date_utc + (ra - lst)/(2*math.pi)*86400
-    -- Removing "!" from os.date to use local laptop time for rise/set
     return os.date("%H:%M", tr - H/(2*math.pi)*86400), os.date("%H:%M", tr), os.date("%H:%M", tr + H/(2*math.pi)*86400)
 end
 
--- --- DATA FETCHING ---
 local function build_url(command, start_time, stop_time)
     local params = {
         "format=text",

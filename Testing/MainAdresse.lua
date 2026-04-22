@@ -1,4 +1,3 @@
--- Add LuaRocks paths
 package.path  = package.path .. ";C:/msys64/home/odin7/.luarocks/share/lua/5.4/?.lua;C:/msys64/home/odin7/.luarocks/share/lua/5.4/?/init.lua"
 package.cpath = package.cpath .. ";C:/msys64/home/odin7/.luarocks/lib/lua/5.4/?.dll"
 
@@ -6,7 +5,6 @@ local http = require "socket.http"
 local ltn12 = require "ltn12"
 local math = require "math"
 
--- Planets (Earth removed)
 local planets = {
     { name = "Mercury", id = "199" },
     { name = "Venus",   id = "299" },
@@ -16,20 +14,13 @@ local planets = {
     { name = "Uranus",  id = "799" },
     { name = "Neptune", id = "899" },
     { name = "Pluto",   id = "999" },
-    {name = "Moon", id = "301"},
 }
 
-local colors = {
-        Mercury = "\27[35m", Venus = "\27[33m", Mars = "\27[31m", Jupiter = "\27[36m",
-        Saturn = "\27[34m", Uranus = "\27[32m", Neptune = "\27[94m", Pluto = "\27[95m", Moon = "\27[97m"
-}
-
-local center = "coord@399"
+local center = "500@399" 
 local step_size = "1 m"
 
--- Observer: Bordeaux-Saint-Clair (Étretat), France
-local observer_lat = math.rad(49.7079)
-local observer_lon = 0.2056 -- degrees
+local observer_lat = math.rad(49.7005244)
+local observer_lon = 0.2521451 
 
 local month_map = {Jan=1, Feb=2, Mar=3, Apr=4, May=5, Jun=6,
                    Jul=7, Aug=8, Sep=9, Oct=10, Nov=11, Dec=12}
@@ -44,7 +35,6 @@ local function parse_horizons_time(timestr)
     }
 end
 
--- Time selection
 print("Select time option:\n1) Current time\n2) Fixed time")
 io.write("Enter choice (1 or 2): ")
 local choice = io.read()
@@ -74,7 +64,6 @@ else
     error("Invalid choice")
 end
 
--- URL helper
 local function urlencode(str)
     return (str:gsub("\n", "\r\n"):gsub("([^%w%-%.%_%~])", function(c)
         return string.format("%%%02X", string.byte(c))
@@ -134,7 +123,6 @@ local function parse_rows(text)
     return rows
 end
 
--- LST in degrees
 local function lst_deg(time_utc)
     local jd = 2440587.5 + time_utc/86400
     local T = (jd - 2451545.0)/36525
@@ -143,7 +131,6 @@ local function lst_deg(time_utc)
     return (gst + observer_lon) % 360
 end
 
--- RA/DEC -> Alt/Az
 local function ra_dec_to_altaz(ra_deg, dec_deg, time_utc)
     local ra = math.rad(ra_deg)
     local dec = math.rad(dec_deg)
@@ -157,7 +144,6 @@ local function ra_dec_to_altaz(ra_deg, dec_deg, time_utc)
     return math.deg(alt), math.deg(az)
 end
 
--- Rise/Transit/Set
 local function rise_transit_set(ra_deg, dec_deg, date_utc)
     local lat = observer_lat
     local dec = math.rad(dec_deg)
@@ -179,14 +165,13 @@ local function rise_transit_set(ra_deg, dec_deg, date_utc)
     return os.date("%H:%M", rise_time), os.date("%H:%M", transit_time), os.date("%H:%M", set_time), transit_time
 end
 
--- Convert azimuth to cardinal
 local function az_to_cardinal(az_deg)
     local directions = {"N","NE","E","SE","S","SW","W","NW"}
     local index = math.floor(((az_deg + 22.5) % 360) / 45) + 1
     return directions[index]
 end
 
--- Format visibility + telescope info
+
 local function format_observation(alt, az, transit_sec, current_sec)
     local visible = alt > 0
     local near_transit = visible and math.abs(current_sec - transit_sec)/60 <= 5
@@ -194,30 +179,26 @@ local function format_observation(alt, az, transit_sec, current_sec)
     local flag = visible and "YES" or "NO"
     if near_transit then flag = flag.."*" end
     if visible then
-        local color_start = "\27[32m" -- green
+        local color_start = "\27[32m" 
         local color_end = "\27[0m"
         return color_start..flag.." ("..cardinal..", "..string.format("%.1f°", alt)..")"..color_end
     else
-        local color_start = "\27[31m"
-        local color_end = "\27[0m"
-        return color_start..flag.." ("..cardinal..", "..string.format("%.1f°", alt)..")"..color_end
+        return flag.." ("..cardinal..", "..string.format("%.1f°", alt)..")"
     end
 end
 
--- MAIN LOOP
 local visible_planets = {}
-local planet_name = planet
 for _, planet in ipairs(planets) do
-    print("\n==== ".. colors[planet.name] ..planet.name.. "\27[0m" .." ====")
+    print("\n==== "..planet.name.." ====")
     local url = build_url(planet.id)
     local text = fetch(url)
     local rows = parse_rows(text)
 
     if #rows == 0 then
         print("No RA/DEC rows found.\n")
-    elseA
-        print(string.format("%-20s %-12s %-12s %-8s %-8s %-15s %-8s %-8s %-8s",
-            "Time", "RA (deg)", "DEC (deg)", "ALT", "AZ", "Visible", "Rise", "Transit", "Set"))
+    else
+        print(string.format("%-16s %-12s %-12s %-8s %-8s %-20s %-8s %-8s %-8s",
+            "Time", "RA (deg)", "DEC (deg)", "ALT", "AZ", "Visible (Cardinal, Alt)", "Rise", "Transit", "Set"))
         print(string.rep("-", 120))
 
         for _, row in ipairs(rows) do
@@ -230,14 +211,13 @@ for _, planet in ipairs(planets) do
                 row.time, row.ra, row.dec, alt, az, visible_flag, rise, transit_time_str, settime)
 
             if math.abs(os.difftime(utc_time, current_time)) < 60 then
-                local color_start = "\27[1m" 
+                local color_start = "\27[1;32m" -- bright green
                 local color_end   = "\27[0m"
                 line = color_start..line..color_end
             end
 
             print(line)
 
-            -- Store for "best planets" suggestion
             if alt > 0 then
                 visible_planets[#visible_planets+1] = {
                     name = planet.name, alt = alt, az = az,
@@ -248,7 +228,7 @@ for _, planet in ipairs(planets) do
     end
 end
 
--- BEST PLANETS (one per planet, max altitude)
+
 print("\n=== Best Planets to Observe Right Now ===")
 if #visible_planets == 0 then
     print("No planets currently visible from your location.")
@@ -260,7 +240,10 @@ else
         end
     end
 
-
+    local colors = {
+        Mercury = "\27[35m", Venus = "\27[33m", Mars = "\27[31m", Jupiter = "\27[36m",
+        Saturn = "\27[34m", Uranus = "\27[32m", Neptune = "\27[37m", Pluto = "\27[95m",
+    }
     local reset = "\27[0m"
 
     local sorted = {}

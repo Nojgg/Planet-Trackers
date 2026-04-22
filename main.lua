@@ -1,16 +1,13 @@
 local Backend = require("Backend")
 
--- --- CONFIGURATION ---
 local SCOPE_FL, EYEPIECE_FL, EYEPIECE_AFOV = 900, 9, 66
--- Initialize app_mode so the buttons have a starting state
 app_mode = "log" 
 
 local planets_data, queue = {}, {}
 local is_fetching, time_offset, selected_planet = false, 0, "Jupiter"
 local night_mode = false
-local loc_status = "Locating..." -- Added for location tracking
+local loc_status = "Locating..."
 
--- AJOUT : Variables pour le Scroll
 local scroll_y = 0
 local max_scroll = 0
 
@@ -21,7 +18,7 @@ function love.load()
     font_small = love.graphics.newFont(12)
     font_tiny = love.graphics.newFont(10)
     
-    Backend.initLocation() -- Added: Trigger the location fetch
+    Backend.initLocation()
     refresh_data()
 end
 
@@ -44,15 +41,13 @@ end
 
 function love.update(dt) 
     Backend.poll() 
-    
-    -- Added: Check for location update and refresh data if found
+
     if Backend.updateLocation() then
         loc_status = string.format("Lat: %.2f Lon: %.2f", Backend.lat, Backend.lon)
         refresh_data() 
     end
 end
 
--- AJOUT : Gestion de la molette
 function love.wheelmoved(x, y)
     if app_mode == "log" then
         scroll_y = scroll_y - (y * 30)
@@ -60,10 +55,8 @@ function love.wheelmoved(x, y)
     end
 end
 
--- HELPER: Apply Red Filter for Night Mode
 local function set_color(r, g, b, a)
     if night_mode then
-        -- Convert brightness to red-only
         local avg = (r + g + b) / 3
         love.graphics.setColor(avg, 0, 0, a or 1)
     else
@@ -81,10 +74,8 @@ function love.draw()
     local w, h = love.graphics.getDimensions()
     local list_w, bottom_h = 280, 180
     
-    -- Background
     love.graphics.clear(0.01, 0.01, 0.03)
 
-    -- --- 1. SIDEBAR ---
     set_color(0.05, 0.05, 0.1, 1)
     love.graphics.rectangle("fill", 0, 0, list_w, h)
     
@@ -92,12 +83,10 @@ function love.draw()
     love.graphics.setFont(font_bold)
     love.graphics.print("Hadley Observer Log", 20, 20)
     
-    -- Added: Show location status in the sidebar
     set_color(0.4, 0.4, 0.6, 1)
     love.graphics.setFont(font_tiny)
     love.graphics.print(loc_status, 20, 42)
 
-    -- --- SIDEBAR TAB TOGGLE ---
     local sidebar_w = 280 
     local tab_h = 40
     local header_h = 70 
@@ -115,18 +104,15 @@ function love.draw()
     else love.graphics.setColor(0.1, 0.15, 0.25, 1) end
     love.graphics.rectangle("fill", (sidebar_w/2) + 2, header_h + 5, (sidebar_w/2) - 7, tab_h - 10, 4)
 
-    -- BUTTON TEXT
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setFont(font_small)
     love.graphics.printf("LOG", 5, header_h + 12, (sidebar_w/2) - 7, "center")
     love.graphics.printf("SPECS", (sidebar_w/2) + 2, header_h + 12, (sidebar_w/2) - 7, "center")
     
-    -- ONLY DRAW LOG IF IN LOG MODE
     if app_mode == "log" then
         local start_y, spacing = 115, 65
         local view_h = h - bottom_h - start_y
 
-        -- AJOUT : Zone Scissor pour le défilement
         love.graphics.setScissor(0, start_y, list_w, view_h)
         love.graphics.push()
         love.graphics.translate(0, -scroll_y)
@@ -164,7 +150,6 @@ function love.draw()
         love.graphics.pop()
         love.graphics.setScissor()
     else
-        -- DRAW SPECS CONTENT
         set_color(1, 1, 1, 1)
         love.graphics.setFont(font_bold)
         love.graphics.print("Telescope Specs", 20, 120)
@@ -177,7 +162,7 @@ function love.draw()
         love.graphics.printf("Use [+] and [-] to change eyepiece.", 20, 260, sidebar_w - 40, "left")
     end
 
-    -- --- 2. PLANISPHERE (SKY MAP) ---
+
     local map_cX = list_w + (w - list_w) / 2
     local map_cY = (h - bottom_h) / 2
     local map_R = math.min(w - list_w, h - bottom_h) * 0.42
@@ -223,7 +208,7 @@ function love.draw()
         end
     end
 
-    -- --- 3. BOTTOM PANEL ---
+
     set_color(0.02, 0.02, 0.05, 1)
     love.graphics.rectangle("fill", list_w, h - bottom_h, w - list_w, bottom_h)
     set_color(1, 1, 1, 0.15)
@@ -239,9 +224,9 @@ function love.draw()
 
     set_color(0.5, 0.5, 0.5, 1)
     love.graphics.setFont(font_tiny)
-    love.graphics.print("N: Night Mode | Arrows: Time | Scroll/Click: Sidebar", list_w + 20, h - bottom_h + 45)
+    love.graphics.print("N: Night Mode | Arrows: Time", list_w + 20, h - bottom_h + 45)
 
-    -- --- 5. EYEPIECE VIEW ---
+
     if selected_planet and planets_data[selected_planet] then
         local d = planets_data[selected_planet]
         local tx, ty, r = w - 120, h - 95, 80 
@@ -266,8 +251,8 @@ function love.draw()
         
         local p_color = {1, 1, 1}
         for _, info in ipairs(Backend.planets) do if info.name == selected_planet then p_color = info.color end end
-        
-        -- AJOUT : Dessin spécifique Étoiles/DSO
+  
+
         local p_type = ""
         for _, info in ipairs(Backend.planets) do if info.name == selected_planet then p_type = info.type end end
 
@@ -297,13 +282,11 @@ function love.draw()
         love.graphics.pop()
         love.graphics.setStencilTest()
 
-        -- Info Label
         set_color(1, 1, 1, 1)
         love.graphics.setFont(font_small)
         love.graphics.printf(selected_planet .. "\n" .. string.format("%.0fx", SCOPE_FL/EYEPIECE_FL) .. "x Mag", tx - 70, ty + r + 10, 140, "center")
     end
 
-    -- AJOUT : Alerte Solaire
     if selected_planet == "Sun" then
         set_color(1, 0, 0, 1)
         love.graphics.setFont(font_bold)
@@ -325,13 +308,12 @@ function love.mousepressed(x, y, button)
     local start_y, spacing = 115, 65
 
     if button == 1 then
-        -- Tabs
         if y > header_h and y < header_h + tab_h then
             if x > 0 and x < list_w / 2 then app_mode = "log"
             elseif x > list_w / 2 and x < list_w then app_mode = "specs" end
         end
 
-        -- AJOUT : Clic Sidebar avec Scroll
+
         if app_mode == "log" and x < list_w and y > start_y and y < (love.graphics.getHeight() - 180) then
             local adjusted_y = y + scroll_y
             local index = math.floor((adjusted_y - start_y) / spacing) + 1
