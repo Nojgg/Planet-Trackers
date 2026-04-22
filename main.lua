@@ -10,6 +10,10 @@ local is_fetching, time_offset, selected_planet = false, 0, "Jupiter"
 local night_mode = false
 local loc_status = "Locating..." -- Added for location tracking
 
+-- AJOUT : Variables pour le Scroll
+local scroll_y = 0
+local max_scroll = 0
+
 function love.load()
     love.window.setTitle("Hadley 114/900 Mission Control")
     love.window.setMode(1200, 800, {resizable=true})
@@ -48,6 +52,14 @@ function love.update(dt)
     end
 end
 
+-- AJOUT : Gestion de la molette
+function love.wheelmoved(x, y)
+    if app_mode == "log" then
+        scroll_y = scroll_y - (y * 30)
+        scroll_y = math.max(0, math.min(scroll_y, max_scroll))
+    end
+end
+
 -- HELPER: Apply Red Filter for Night Mode
 local function set_color(r, g, b, a)
     if night_mode then
@@ -69,39 +81,6 @@ function love.draw()
     local w, h = love.graphics.getDimensions()
     local list_w, bottom_h = 280, 180
     
-    -- --- SIDEBAR TAB TOGGLE ---
-    local sidebar_w = 280 
-    local tab_h = 40
-    local header_h = 70 
-
-    -- 1. Draw the Background for the Tab Buttons
-    love.graphics.setColor(0.05, 0.05, 0.1, 1) 
-    love.graphics.rectangle("fill", 0, header_h, sidebar_w, tab_h)
-
-    -- 2. "LOG" TAB BUTTON
-    local is_log = (app_mode == "log")
-    if is_log then
-        love.graphics.setColor(0.92, 0.72, 0.22, 1) 
-    else
-        love.graphics.setColor(0.1, 0.15, 0.25, 1) 
-    end
-    love.graphics.rectangle("fill", 5, header_h + 5, (sidebar_w/2) - 7, tab_h - 10, 4)
-
-    -- 3. "SPECS" TAB BUTTON
-    local is_specs = (app_mode == "specs")
-    if is_specs then
-        love.graphics.setColor(0.92, 0.72, 0.22, 1) 
-    else
-        love.graphics.setColor(0.1, 0.15, 0.25, 1) 
-    end
-    love.graphics.rectangle("fill", (sidebar_w/2) + 2, header_h + 5, (sidebar_w/2) - 7, tab_h - 10, 4)
-
-    -- 4. BUTTON TEXT
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.setFont(font_small)
-    love.graphics.printf("LOG", 5, header_h + 12, (sidebar_w/2) - 7, "center")
-    love.graphics.printf("SPECS", (sidebar_w/2) + 2, header_h + 12, (sidebar_w/2) - 7, "center")
-
     -- Background
     love.graphics.clear(0.01, 0.01, 0.03)
 
@@ -117,11 +96,43 @@ function love.draw()
     set_color(0.4, 0.4, 0.6, 1)
     love.graphics.setFont(font_tiny)
     love.graphics.print(loc_status, 20, 42)
+
+    -- --- SIDEBAR TAB TOGGLE ---
+    local sidebar_w = 280 
+    local tab_h = 40
+    local header_h = 70 
+
+    love.graphics.setColor(0.05, 0.05, 0.1, 1) 
+    love.graphics.rectangle("fill", 0, header_h, sidebar_w, tab_h)
+
+    local is_log = (app_mode == "log")
+    if is_log then love.graphics.setColor(0.92, 0.72, 0.22, 1) 
+    else love.graphics.setColor(0.1, 0.15, 0.25, 1) end
+    love.graphics.rectangle("fill", 5, header_h + 5, (sidebar_w/2) - 7, tab_h - 10, 4)
+
+    local is_specs = (app_mode == "specs")
+    if is_specs then love.graphics.setColor(0.92, 0.72, 0.22, 1) 
+    else love.graphics.setColor(0.1, 0.15, 0.25, 1) end
+    love.graphics.rectangle("fill", (sidebar_w/2) + 2, header_h + 5, (sidebar_w/2) - 7, tab_h - 10, 4)
+
+    -- BUTTON TEXT
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setFont(font_small)
+    love.graphics.printf("LOG", 5, header_h + 12, (sidebar_w/2) - 7, "center")
+    love.graphics.printf("SPECS", (sidebar_w/2) + 2, header_h + 12, (sidebar_w/2) - 7, "center")
     
     -- ONLY DRAW LOG IF IN LOG MODE
     if app_mode == "log" then
+        local start_y, spacing = 115, 65
+        local view_h = h - bottom_h - start_y
+
+        -- AJOUT : Zone Scissor pour le défilement
+        love.graphics.setScissor(0, start_y, list_w, view_h)
+        love.graphics.push()
+        love.graphics.translate(0, -scroll_y)
+
         for i, p_info in ipairs(Backend.planets) do
-            local data, y = planets_data[p_info.name], 115 + (i-1) * 65 
+            local data, y = planets_data[p_info.name], start_y + (i-1) * spacing 
             
             if selected_planet == p_info.name then
                 set_color(1, 1, 1, 0.1)
@@ -149,6 +160,9 @@ function love.draw()
                 end
             end
         end
+        max_scroll = math.max(0, (#Backend.planets * spacing) - view_h + 20)
+        love.graphics.pop()
+        love.graphics.setScissor()
     else
         -- DRAW SPECS CONTENT
         set_color(1, 1, 1, 1)
@@ -214,72 +228,86 @@ function love.draw()
     love.graphics.rectangle("fill", list_w, h - bottom_h, w - list_w, bottom_h)
     set_color(1, 1, 1, 0.15)
     love.graphics.line(list_w, h - bottom_h, w, h - bottom_h)
+    
+    -- AJOUT : État du ciel
+    local sun_alt = planets_data["Sun"] and planets_data["Sun"].alt
+    local sky_cond = Backend.getSkyCondition(sun_alt)
+    
     set_color(1, 0.8, 0, 1)
     love.graphics.setFont(font_bold)
-    love.graphics.print("UTC: " .. os.date("%H:%M", os.time() + time_offset), list_w + 20, h - bottom_h + 20)
+    love.graphics.print("UTC: " .. os.date("%H:%M", os.time() + time_offset) .. " | SKY: " .. sky_cond, list_w + 20, h - bottom_h + 20)
+
     set_color(0.5, 0.5, 0.5, 1)
     love.graphics.setFont(font_tiny)
-    love.graphics.print("N: Night Mode | Arrows: Time | Click Sidebar: Select", list_w + 20, h - bottom_h + 45)
+    love.graphics.print("N: Night Mode | Arrows: Time | Scroll/Click: Sidebar", list_w + 20, h - bottom_h + 45)
 
--- --- 5. EYEPIECE VIEW (WITH STENCIL CLIPPING) ---
-if selected_planet and planets_data[selected_planet] then
-    local d = planets_data[selected_planet]
-    local tx, ty, r = w - 120, h - 95, 80 
-    local current_tfov = (EYEPIECE_AFOV / (SCOPE_FL / EYEPIECE_FL)) * 3600
-    
-    -- 1. Draw the actual Eyepiece Housing (the background)
-    set_color(0.02, 0.02, 0.05, 1)
-    love.graphics.circle("fill", tx, ty, r)
-    set_color(1, 1, 1, 0.2)
-    love.graphics.circle("line", tx, ty, r)
+    -- --- 5. EYEPIECE VIEW ---
+    if selected_planet and planets_data[selected_planet] then
+        local d = planets_data[selected_planet]
+        local tx, ty, r = w - 120, h - 95, 80 
+        local current_tfov = (EYEPIECE_AFOV / (SCOPE_FL / EYEPIECE_FL)) * 3600
 
-    -- 2. Define the "Cookie Cutter" (Stencil)
-    love.graphics.stencil(function()
+        set_color(0.02, 0.02, 0.05, 1)
         love.graphics.circle("fill", tx, ty, r)
-    end, "replace", 1)
-    love.graphics.setStencilTest("equal", 1)
+        set_color(1, 1, 1, 0.2)
+        love.graphics.circle("line", tx, ty, r)
 
-    -- 3. Draw the Planet inside the Stencil
-    love.graphics.push()
-    love.graphics.translate(tx, ty)
-    love.graphics.rotate(math.pi)
-    
-    local ang_size = d.ang_size or 5
-    local px_size = (ang_size / current_tfov) * (r * 2)
-    
-    local p_color = {1, 1, 1}
-    for _, info in ipairs(Backend.planets) do if info.name == selected_planet then p_color = info.color end end
-    local is_too_far = ang_size < 4.0
+        love.graphics.stencil(function()
+            love.graphics.circle("fill", tx, ty, r)
+        end, "replace", 1)
+        love.graphics.setStencilTest("equal", 1)
 
-    if is_too_far then
-        set_color(p_color[1], p_color[2], p_color[3], 1)
-        love.graphics.points(0, 0)
-        love.graphics.circle("fill", 0, 0, 1.2)
-    elseif selected_planet == "Saturn" then
-        set_color(p_color[1], p_color[2], p_color[3], 0.6)
-        love.graphics.ellipse("line", 0, 0, px_size * 1.2, px_size * 0.4)
-        set_color(p_color[1], p_color[2], p_color[3], 1)
-        love.graphics.circle("fill", 0, 0, px_size / 2)
-    elseif selected_planet == "Jupiter" then
-        set_color(p_color[1], p_color[2], p_color[3], 1)
-        love.graphics.circle("fill", 0, 0, px_size / 2)
-        set_color(1, 1, 1, 0.8)
-        local moon_offsets = {-2.5, -1.8, 1.5, 3.2} 
-        for _, offset in ipairs(moon_offsets) do love.graphics.circle("fill", offset * px_size, 0, 1.5) end
-    else
-        -- Standard Body (Moon, Venus, etc)
-        set_color(p_color[1], p_color[2], p_color[3], 1)
-        love.graphics.circle("fill", 0, 0, px_size / 2)
+        love.graphics.push()
+        love.graphics.translate(tx, ty)
+        love.graphics.rotate(math.pi)
+        
+        local ang_size = d.ang_size or 5
+        local px_size = (ang_size / current_tfov) * (r * 2)
+        
+        local p_color = {1, 1, 1}
+        for _, info in ipairs(Backend.planets) do if info.name == selected_planet then p_color = info.color end end
+        
+        -- AJOUT : Dessin spécifique Étoiles/DSO
+        local p_type = ""
+        for _, info in ipairs(Backend.planets) do if info.name == selected_planet then p_type = info.type end end
+
+        if p_type == "star" then
+            set_color(p_color[1], p_color[2], p_color[3], 1)
+            love.graphics.circle("fill", 0, 0, 1.5)
+        elseif p_type == "dso" then
+            set_color(p_color[1], p_color[2], p_color[3], 0.3)
+            love.graphics.circle("fill", 0, 0, 15)
+            set_color(1, 1, 1, 0.7)
+            love.graphics.points(0, 0)
+        elseif selected_planet == "Saturn" then
+            set_color(p_color[1], p_color[2], p_color[3], 0.6)
+            love.graphics.ellipse("line", 0, 0, px_size * 1.2, px_size * 0.4)
+            set_color(p_color[1], p_color[2], p_color[3], 1)
+            love.graphics.circle("fill", 0, 0, px_size / 2)
+        elseif selected_planet == "Jupiter" then
+            set_color(p_color[1], p_color[2], p_color[3], 1)
+            love.graphics.circle("fill", 0, 0, px_size / 2)
+            set_color(1, 1, 1, 0.8)
+            local moon_offsets = {-2.5, -1.8, 1.5, 3.2} 
+            for _, offset in ipairs(moon_offsets) do love.graphics.circle("fill", offset * px_size, 0, 1.5) end
+        else
+            set_color(p_color[1], p_color[2], p_color[3], 1)
+            love.graphics.circle("fill", 0, 0, px_size / 2)
+        end
+        love.graphics.pop()
+        love.graphics.setStencilTest()
+
+        -- Info Label
+        set_color(1, 1, 1, 1)
+        love.graphics.setFont(font_small)
+        love.graphics.printf(selected_planet .. "\n" .. string.format("%.0fx", SCOPE_FL/EYEPIECE_FL) .. "x Mag", tx - 70, ty + r + 10, 140, "center")
     end
-    love.graphics.pop()
 
-    -- 4. Turn off the Stencil so the rest of the UI draws normally
-    love.graphics.setStencilTest()
-
-    -- Info Label
-    set_color(1, 1, 1, 1)
-    love.graphics.setFont(font_small)
-    love.graphics.printf(selected_planet .. "\n" .. string.format("%.0fx", SCOPE_FL/EYEPIECE_FL) .. "x Mag", tx - 70, ty + r + 10, 140, "center")
+    -- AJOUT : Alerte Solaire
+    if selected_planet == "Sun" then
+        set_color(1, 0, 0, 1)
+        love.graphics.setFont(font_bold)
+        love.graphics.printf("!!! SOLAR WARNING !!!\nFILTER REQUIRED", w - 250, h - 250, 200, "center")
     end
 end
 
@@ -297,15 +325,16 @@ function love.mousepressed(x, y, button)
     local start_y, spacing = 115, 65
 
     if button == 1 then
-        -- Check for Tab Clicks
+        -- Tabs
         if y > header_h and y < header_h + tab_h then
             if x > 0 and x < list_w / 2 then app_mode = "log"
             elseif x > list_w / 2 and x < list_w then app_mode = "specs" end
         end
 
-        -- Sidebar Selection (Only in log mode)
-        if app_mode == "log" and x < list_w then
-            local index = math.floor((y - start_y) / spacing) + 1
+        -- AJOUT : Clic Sidebar avec Scroll
+        if app_mode == "log" and x < list_w and y > start_y and y < (love.graphics.getHeight() - 180) then
+            local adjusted_y = y + scroll_y
+            local index = math.floor((adjusted_y - start_y) / spacing) + 1
             if Backend.planets[index] then selected_planet = Backend.planets[index].name end
         end
     end

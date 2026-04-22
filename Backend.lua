@@ -10,17 +10,36 @@ local OBSERVER_LAT = math.rad(Backend.lat)
 local CENTER       = "coord@399"
 local STEP_SIZE    = "1 m"
 
+-- AJOUT : Nouveaux objets (Soleil, Étoiles, DSO)
 Backend.planets = {
-    { name = "Mercury", id = "199", color = {0.80, 0.55, 0.85} },
-    { name = "Venus",   id = "299", color = {0.95, 0.85, 0.35} },
-    { name = "Mars",    id = "499", color = {0.90, 0.30, 0.25} },
-    { name = "Jupiter", id = "599", color = {0.35, 0.85, 0.90} },
-    { name = "Saturn",  id = "699", color = {0.40, 0.55, 0.90} },
-    { name = "Uranus",  id = "799", color = {0.35, 0.90, 0.65} },
-    { name = "Neptune", id = "899", color = {0.35, 0.55, 1.00} },
-    { name = "Pluto",   id = "999", color = {0.80, 0.45, 1.00} },
-    { name = "Moon",    id = "301", color = {0.95, 0.95, 0.95} },
+    { name = "Sun",     id = "10",      color = {1.0, 0.9, 0.2} },
+    { name = "Mercury", id = "199",     color = {0.80, 0.55, 0.85} },
+    { name = "Venus",   id = "299",     color = {0.95, 0.85, 0.35} },
+    { name = "Mars",    id = "499",     color = {0.90, 0.30, 0.25} },
+    { name = "Jupiter", id = "599",     color = {0.35, 0.85, 0.90} },
+    { name = "Saturn",  id = "699",     color = {0.40, 0.55, 0.90} },
+    { name = "Uranus",  id = "799",     color = {0.35, 0.90, 0.65} },
+    { name = "Neptune", id = "899",     color = {0.35, 0.55, 1.00} },
+    { name = "Pluto",   id = "999",     color = {0.80, 0.45, 1.00} },
+    { name = "Moon",    id = "301",     color = {0.95, 0.95, 0.95} },
 }
+
+-- AJOUT : Fonction de Réfraction
+local function apply_refraction(alt_deg)
+    if alt_deg < -0.8 then return alt_deg end
+    local r = 1.02 / math.tan(math.rad(alt_deg + 10.3 / (alt_deg + 5.11)))
+    return alt_deg + (r / 60)
+end
+
+-- AJOUT : Fonction État du Ciel
+function Backend.getSkyCondition(sun_alt)
+    if not sun_alt then return "Loading..." end
+    if sun_alt > 0 then return "Jour"
+    elseif sun_alt > -6 then return "Crép. Civil"
+    elseif sun_alt > -12 then return "Crép. Nautique"
+    elseif sun_alt > -18 then return "Crép. Astro"
+    else return "Nuit Noire" end
+end
 
 -- --- LOCATION SYNC LOGIC ---
 function Backend.initLocation()
@@ -41,7 +60,7 @@ function Backend.updateLocation()
         Backend.lat = res.lat
         Backend.lon = res.lon
         OBSERVER_LAT = math.rad(Backend.lat) -- Update the math variable
-        print(string.format("Location Synced: %.4f, %.4f", Backend.lat, Backend.lon))
+      --  print(string.format("Location Synced: %.4f, %.4f", Backend.lat, Backend.lon))
         return true
     end
     return false
@@ -72,7 +91,9 @@ local function ra_dec_to_altaz(ra_deg, dec_deg, time_utc)
     local cos_az = (math.sin(dec) - math.sin(alt)*math.sin(OBSERVER_LAT)) / (math.cos(alt)*math.cos(OBSERVER_LAT))
     local az = math.acos(math.max(-1, math.min(1, cos_az)))
     if math.sin(ha) > 0 then az = 2*math.pi - az end
-    return math.deg(alt), math.deg(az)
+    
+    -- MODIFICATION : Application de la réfraction au retour
+    return apply_refraction(math.deg(alt)), math.deg(az)
 end
 
 local function rise_transit_set(ra_deg, dec_deg, date_utc)
