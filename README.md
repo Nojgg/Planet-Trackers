@@ -4,6 +4,7 @@
 
 The interface includes a simulated eyepiece view that accounts for Newtonian inversion and magnification math based on your specific equipment configuration.
 
+This app has around 10° of error margin
 ---
 
 ## Features
