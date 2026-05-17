@@ -16,7 +16,6 @@ local loc_status = "Locating..."
 local scroll_y = 0
 local max_scroll = 0
 
--- Separate dedicated scrolling tracker for the journal viewer history list
 local journal_scroll_y = 0
 local journal_max_scroll = 0
 
@@ -27,31 +26,35 @@ local custom_id = ""
 local log_notes = ""
 local saved_logs = {}
 
+-- Variables for our custom location settings
+local loc_address = ""
+local loc_city = ""
+local loc_country = ""
+local is_updating_loc = false
+
 local idle_time = 0
 local is_dimmed = false
 
 local hold_timers = { left = 0, right = 0, plus = 0, minus = 0 }
 local HOLD_SPEED = 0.15 
 
-function love.load()
-    love.window.setTitle("Universal Telescope Mission Control")
-    love.window.setMode(1200, 800, {resizable=true})
-    
-    font_bold = love.graphics.newFont(16)
-    font_small = love.graphics.newFont(12)
-    font_tiny = love.graphics.newFont(10)
-    
-    if love.filesystem.getInfo("observer_journal.txt") then
-        for line in love.filesystem.lines("observer_journal.txt") do
-            table.insert(saved_logs, line)
-        end
-    end
-    
-    Backend.initLocation()
-    refresh_data()
+-- Helper function to drop the last full UTF-8 character safely without breaking byte strings
+local function utf8_pop(str)
+    -- Matches the last valid multi-byte or single-byte UTF-8 character sequence at the end of the string
+    return str:gsub("[%z\x01-\x7F\xC2-\xF4][\x80-\xBF]*$", "")
 end
 
-function refresh_data()
+-- Helper function to save your modified coordinates/text configuration safely to disk
+local function save_location_profile()
+    local data_string = string.format("%f\n%f\n%s\n%s\n%s", 
+        Backend.lat, Backend.lon, loc_address, loc_city, loc_country)
+    love.filesystem.write("custom_location.txt", data_string)
+end
+
+-- Forward declaration of queue helpers so they link together perfectly
+local process_next_in_queue
+
+local function refresh_data()
     if is_fetching then return end
     queue = {}
     for i, p in ipairs(Backend.planets) do 
@@ -61,7 +64,7 @@ function refresh_data()
     process_next_in_queue()
 end
 
-function process_next_in_queue()
+process_next_in_queue = function()
     if #queue == 0 then 
         is_fetching = false 
         return 
@@ -75,6 +78,79 @@ function process_next_in_queue()
     end)
 end
 
+-- Helper function to fetch coordinates using OpenStreetMap Nominatim API asynchronously
+local function geocode_address()
+    if is_updating_loc then return end
+    is_updating_loc = true
+    loc_status = "Geocoding Address..."
+    
+    local query_string = string.format("%s, %s, %s", loc_address, loc_city, loc_country)
+    -- URL encode spaces manually to ensure safety inside curl shell executions
+    local encoded_query = query_string:gsub("([^%w])", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end)
+    
+    local url = "https://nominatim.openstreetmap.org/search?q=" .. encoded_query .. "&format=json&limit=1"
+    
+    local thread_code = [[
+        local url = ...
+        -- Nominatim demands a clear User-Agent header or it returns a 403 authorization lock
+        local cmd = string.format('curl -s -A "EphemerisLiveObserver/1.0" -L "%s"', url)
+        local handle = io.popen(cmd)
+        local result = handle:read("*a")
+        handle:close()
+        
+        if result then
+            local lat = result:match('"lat":"([%d%.%-]+)"')
+            local lon = result:match('"lon":"([%d%.%-]+)"')
+            if lat and lon then
+                love.thread.getChannel("geo_res"):push({lat = tonumber(lat), lon = tonumber(lon)})
+                return
+            end
+        end
+        love.thread.getChannel("geo_res"):push({error = true})
+    ]]
+    
+    love.thread.newThread(thread_code):start(url)
+end
+
+function love.load()
+local iconData = love.image.newImageData("icon.png")
+    love.window.setIcon(iconData)
+
+    love.window.setTitle("Ephemeris Live")
+    love.window.setMode(1200, 800, {resizable=true})
+    
+    font_bold = love.graphics.newFont(16)
+    font_small = love.graphics.newFont(12)
+    font_tiny = love.graphics.newFont(10)
+    
+    if love.filesystem.getInfo("observer_journal.txt") then
+        for line in love.filesystem.lines("observer_journal.txt") do
+            table.insert(saved_logs, line)
+        end
+    end
+    
+    -- Check if a custom location file already exists on this disk configuration
+    if love.filesystem.getInfo("custom_location.txt") then
+        local lines = {}
+        for line in love.filesystem.lines("custom_location.txt") do
+            table.insert(lines, line)
+        end
+        if #lines >= 5 then
+            Backend.lat = tonumber(lines[1]) or Backend.lat
+            Backend.lon = tonumber(lines[2]) or Backend.lon
+            loc_address = lines[3] or ""
+            loc_city = lines[4] or ""
+            loc_country = lines[5] or ""
+            loc_status = string.format("Lat: %.2f Lon: %.2f", Backend.lat, Backend.lon)
+            refresh_data()
+        end
+    else
+        Backend.initLocation()
+    end
+end
+
 function love.update(dt) 
     Backend.poll() 
 
@@ -83,9 +159,25 @@ function love.update(dt)
         is_dimmed = true 
     end
 
+    -- Check for updates coming from standard automated IP lookup thread
     if Backend.updateLocation() then
         loc_status = string.format("Lat: %.2f Lon: %.2f", Backend.lat, Backend.lon)
         refresh_data() 
+    end
+    
+    -- Check for updates coming back from custom Nominatim geolocation thread pool
+    local geo_msg = love.thread.getChannel("geo_res"):pop()
+    if geo_msg then
+        is_updating_loc = false
+        if geo_msg.error then
+            loc_status = "Geocode Failed. Retrying..."
+        else
+            Backend.lat = geo_msg.lat
+            Backend.lon = geo_msg.lon
+            loc_status = string.format("Lat: %.2f Lon: %.2f", Backend.lat, Backend.lon)
+            save_location_profile()
+            refresh_data()
+        end
     end
 
     local trigger_refresh = false
@@ -142,7 +234,6 @@ function love.wheelmoved(x, y)
     local w, h = love.graphics.getDimensions()
     local list_w = math.max(240, math.floor(w * 0.25))
 
-    -- Distribute wheel events dynamically depending on which tab frame the mouse is hover-focused on
     if love.mouse.getX() < list_w then
         if app_mode == "log" then
             scroll_y = scroll_y - (y * 30)
@@ -173,7 +264,6 @@ end
 function love.draw()
     local w, h = love.graphics.getDimensions()
     
-    -- Responsive sizing thresholds to guarantee layout visibility at small dimensions
     local list_w = math.max(240, math.floor(w * 0.25))
     local bottom_h = math.max(150, math.floor(h * 0.22))
     local header_h = 70 
@@ -198,17 +288,14 @@ function love.draw()
     love.graphics.setColor(0.05, 0.05, 0.1, 1) 
     love.graphics.rectangle("fill", 0, header_h, list_w, tab_h)
 
-    -- Tab 1: LOG
     if app_mode == "log" then love.graphics.setColor(0.92, 0.72, 0.22, 1) 
     else love.graphics.setColor(0.1, 0.15, 0.25, 1) end
     love.graphics.rectangle("fill", 5, header_h + 5, each_tab_w - 4, tab_h - 10, 4)
 
-    -- Tab 2: SPECS
     if app_mode == "specs" then love.graphics.setColor(0.92, 0.72, 0.22, 1) 
     else love.graphics.setColor(0.1, 0.15, 0.25, 1) end
     love.graphics.rectangle("fill", 5 + each_tab_w, header_h + 5, each_tab_w - 4, tab_h - 10, 4)
 
-    -- Tab 3: JOURNAL (New feature window)
     if app_mode == "journal" then love.graphics.setColor(0.92, 0.72, 0.22, 1) 
     else love.graphics.setColor(0.1, 0.15, 0.25, 1) end
     love.graphics.rectangle("fill", 5 + (each_tab_w * 2), header_h + 5, each_tab_w - 4, tab_h - 10, 4)
@@ -289,35 +376,42 @@ function love.draw()
         set_color(0.6, 0.6, 0.8, 1)
         love.graphics.print("Resulting Mag: " .. string.format("%.1fx", calculated_mag), 20, start_y + 150)
         
+        -- Custom Geolocation Interface Configurator Section
         set_color(1, 1, 1, 1)
         love.graphics.setFont(font_bold)
-        love.graphics.print("Bookmark Target", 20, start_y + 190)
+        love.graphics.print("Observation Coordinates", 20, start_y + 185)
         
         love.graphics.setFont(font_tiny)
         local input_long_w = list_w - 40
         
         set_color(0.8, 0.8, 0.8, 1)
-        love.graphics.print("Target Name:", 20, start_y + 220)
-        if active_input == "custom_name" then set_color(0.2, 0.4, 0.8, 1) else set_color(0.15, 0.15, 0.25, 1) end
-        love.graphics.rectangle("fill", 20, start_y + 235, input_long_w, 20, 4)
+        love.graphics.print("Address/Street Name:", 20, start_y + 215)
+        if active_input == "loc_address" then set_color(0.2, 0.4, 0.8, 1) else set_color(0.15, 0.15, 0.25, 1) end
+        love.graphics.rectangle("fill", 20, start_y + 230, input_long_w, 20, 4)
         set_color(1, 1, 1, 1)
-        love.graphics.print(custom_name .. (active_input == "custom_name" and "|" or ""), 26, start_y + 239)
+        love.graphics.print(loc_address .. (active_input == "loc_address" and "|" or ""), 26, start_y + 234)
 
         set_color(0.8, 0.8, 0.8, 1)
-        love.graphics.print("Horizons ID/Des:", 20, start_y + 265)
-        if active_input == "custom_id" then set_color(0.2, 0.4, 0.8, 1) else set_color(0.15, 0.15, 0.25, 1) end
-        love.graphics.rectangle("fill", 20, start_y + 280, input_long_w, 20, 4)
+        love.graphics.print("City Name:", 20, start_y + 260)
+        if active_input == "loc_city" then set_color(0.2, 0.4, 0.8, 1) else set_color(0.15, 0.15, 0.25, 1) end
+        love.graphics.rectangle("fill", 20, start_y + 275, input_long_w, 20, 4)
         set_color(1, 1, 1, 1)
-        love.graphics.print(custom_id .. (active_input == "custom_id" and "|" or ""), 26, start_y + 284)
+        love.graphics.print(loc_city .. (active_input == "loc_city" and "|" or ""), 26, start_y + 279)
 
-        set_color(0.2, 0.6, 0.3, 1)
-        love.graphics.rectangle("fill", 20, start_y + 315, input_long_w, 25, 4)
+        set_color(0.8, 0.8, 0.8, 1)
+        love.graphics.print("Country Name:", 20, start_y + 305)
+        if active_input == "loc_country" then set_color(0.2, 0.4, 0.8, 1) else set_color(0.15, 0.15, 0.25, 1) end
+        love.graphics.rectangle("fill", 20, start_y + 320, input_long_w, 20, 4)
+        set_color(1, 1, 1, 1)
+        love.graphics.print(loc_country .. (active_input == "loc_country" and "|" or ""), 26, start_y + 324)
+
+        set_color(0.2, 0.5, 0.7, 1)
+        love.graphics.rectangle("fill", 20, start_y + 355, input_long_w, 25, 4)
         set_color(1, 1, 1, 1)
         love.graphics.setFont(font_small)
-        love.graphics.printf("REGISTER TARGET", 20, start_y + 320, input_long_w, "center")
+        love.graphics.printf("GEOCODE & UPDATE PANEL", 20, start_y + 360, input_long_w, "center")
         
     elseif app_mode == "journal" then
-        -- --- NEW INTERACTIVE JOURNAL VIEWER HISTORY DIRECTORY TAB LAYER ---
         set_color(1, 1, 1, 1)
         love.graphics.setFont(font_bold)
         love.graphics.print("Session Log Entries", 20, start_y)
@@ -554,6 +648,12 @@ function love.textinput(t)
         custom_id = custom_id .. t
     elseif active_input == "session_notes" then
         log_notes = log_notes .. t
+    elseif active_input == "loc_address" then
+        loc_address = loc_address .. t
+    elseif active_input == "loc_city" then
+        loc_city = loc_city .. t
+    elseif active_input == "loc_country" then
+        loc_country = loc_country .. t
     end
 end
 
@@ -573,11 +673,17 @@ function love.keypressed(k)
                 local str = tostring(EYEPIECE_AFOV)
                 EYEPIECE_AFOV = tonumber(str:sub(1, #str - 1)) or 0
             elseif active_input == "custom_name" then
-                custom_name = custom_name:sub(1, #custom_name - 1)
+                custom_name = utf8_pop(custom_name)
             elseif active_input == "custom_id" then
-                custom_id = custom_id:sub(1, #custom_id - 1)
+                custom_id = utf8_pop(custom_id)
             elseif active_input == "session_notes" then
-                log_notes = log_notes:sub(1, #log_notes - 1)
+                log_notes = utf8_pop(log_notes)
+            elseif active_input == "loc_address" then
+                loc_address = utf8_pop(loc_address)
+            elseif active_input == "loc_city" then
+                loc_city = utf8_pop(loc_city)
+            elseif active_input == "loc_country" then
+                loc_country = utf8_pop(loc_country)
             end
         elseif k == "return" or k == "kpenter" or k == "escape" then
             active_input = nil
@@ -607,7 +713,6 @@ function love.mousepressed(x, y, button)
     local spacing = 65
 
     if button == 1 then
-        -- Check responsive tab headers
         if y > header_h and y < header_h + tab_h and x < list_w then
             if x > 0 and x < 5 + each_tab_w then 
                 app_mode = "log" active_input = nil
@@ -634,20 +739,13 @@ function love.mousepressed(x, y, button)
                 elseif y >= start_y + 110 and y <= start_y + 134 then active_input = "afov"
                 else active_input = nil end
             elseif x >= 20 and x <= list_w - 20 then
-                if y >= start_y + 235 and y <= start_y + 255 then active_input = "custom_name"
-                elseif y >= start_y + 280 and y <= start_y + 300 then active_input = "custom_id"
-                elseif y >= start_y + 315 and y <= start_y + 340 then
-                    if custom_name ~= "" and custom_id ~= "" then
-                        table.insert(Backend.planets, {
-                            name = custom_name,
-                            id = custom_id,
-                            color = {0.7, 0.7, 0.9},
-                            type = "dso"
-                        })
-                        custom_name = ""
-                        custom_id = ""
-                        active_input = nil
-                        refresh_data()
+                if y >= start_y + 230 and y <= start_y + 250 then active_input = "loc_address"
+                elseif y >= start_y + 275 and y <= start_y + 295 then active_input = "loc_city"
+                elseif y >= start_y + 320 and y <= start_y + 340 then active_input = "loc_country"
+                elseif y >= start_y + 355 and y <= start_y + 380 then
+                    active_input = nil
+                    if loc_city ~= "" or loc_country ~= "" then
+                        geocode_address()
                     end
                 else active_input = nil end
             else
@@ -655,7 +753,6 @@ function love.mousepressed(x, y, button)
             end
         end
 
-        -- Check responsive coordinates for the bottom logger field box panel components
         local box_x = list_w + 20
         local box_w = math.max(200, math.floor((w - list_w) * 0.45))
         if x >= box_x and x <= box_x + box_w and y >= h - bottom_h + 65 and y <= h - bottom_h + 105 then

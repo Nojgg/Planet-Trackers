@@ -1,43 +1,40 @@
-# Hadley Mission Control
+# Ephemeris Live
 
-**Hadley Mission Control** is a real-time astronomical observation and telescope control interface built with **LÖVE**. This tool is specifically calibrated for the **Hadley 114/900 Newtonian Reflector**. It synchronizes live ephemeris data with your local observation site to provide high-precision positioning for celestial bodies.
+A lightweight, real-time astronomical tracking dashboard built using the LÖVE framework (Lua). It’s designed to act as a responsive "mission control" station for amateur astronomers, visual observers, or anyone using a manual setup like the Hadley 3D-printed telescope.
 
-The interface includes a simulated eyepiece view that accounts for Newtonian inversion and magnification math based on your specific equipment configuration.
+Instead of heavy background assets or massive local databases, the app queries the **NASA/JPL Horizons API** asynchronously over lightweight HTTP threads to get mathematically precise coordinate trends, tracking profiles, and visual data for targets in our solar system.
 
-This app has around 10° of error margin
+![Dashboard Preview](https://cdn.discordapp.com/attachments/1416155869686661234/1505567083667132527/image.png?ex=6a0b181c&is=6a09c69c&hm=2310635e6e56564d0069b748b390d72033eeea1bca7d187b2d8ddf78658b78d2&) 
+
 ---
 
 ## Features
 
-* **Horizons API Integration:** Asynchronous fetching of topocentric coordinates from NASA/JPL.
-* **Optics Simulation:** Real-time magnification and True Field of View (TFOV) calculation.
-* **Newtonian Inversion:** 180-degree image rotation simulation to match physical eyepiece output.
-* **Planisphere Mapping:** Live altitude/azimuth grid with cardinal direction markers and targeting overlays.
-* **Night Mode:** Luminance-to-Red channel filtering for dark-site preservation.
-* **Coordinate Synchronization:** Automated observer location via IP-API.
+* **Asynchronous NASA/JPL Data Fetching:** Spawns dedicated background threads to fetch real-time celestial data from the Horizons database without stalling or causing frame drops in the main rendering thread.
+* **Auto-Location Detection:** Uses a fast, non-blocking IP lookup to grab your approximate latitude and longitude on startup so your local Alt/Az coordinates, rise times, and transit schedules are accurate immediately.
+* **Custom Locations:** Enter your own adress in the spec tab.
+* **Live Planisphere Radar View:** Computes and translates raw celestial coordinates into an intuitive top-down local sky map projection.
+* **Simulated Newtonian Eyepiece Reticle:** Features a custom stencil-masked eyepiece simulator. It scales magnification based on your current scope and eyepiece focal lengths, simulating inverted optics and moon/planet configurations.
+* **Tactical Night Mode:** Toggles a red-scale color profile across all drawing matrices to preserve your eyes' dark adaptation when using a laptop or screen out in the field.
 
 ---
 
-## Controls
+## Keyboard Controls & Shortcuts
 
-### Navigation
-* **Mouse Click:** Select a celestial body from the sidebar to track.
-* **N:** Toggle Night Mode (Red Filter).
-* **R:** Reset time offset to current UTC.
-
-### Time & Optics
-* **Left/Right Arrows:** Offset time by +/- 1 hour.
-* **[+]/[-] Keys:** Increment/Decrement eyepiece focal length (scales FOV live).
+* **`N`** - Toggle Red-scale filter
+* **`R`** - Reset time offset back to current real-world UTC time
+* **`Left Arrow` / `Right Arrow`** - Shift time tracking backwards or forwards by 1 hour increments to predict upcoming transits
+* **`+` / `-`** - Increase or decrease the simulated eyepiece focal length to test out different magnifications fluidly
 
 ---
 
-## Technical Implementation
+## Running Locally
 
-### Threading
-Network requests to NASA's Horizons system are handled in a separate thread to prevent UI blocking during data fetch cycles.
+To run the project, you simply need to install the exe file in the release page 
 
----
-
-#### Theres alot of useless files , don't worry about it its just for personal testing and i never actually deleted them because they can always be usefull, just download the release !
-
-*Hadley 114/900 Mission Control Documentation 2026
+### Cloned Repository Execution
+1. Clone this repository down to your machine:
+   ```bash
+   git clone [https://github.com/Nojgg/Ephemeris-Live.git](https://github.com/Nojgg/Ephemeris-Live.git)
+   cd ephemeris-live
+   ```
